@@ -1,0 +1,28 @@
+import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { TypeOrmModuleOptions, TypeOrmOptionsFactory } from '@nestjs/typeorm';
+import { join } from 'path';
+
+@Injectable()
+export class DatabaseConfigService implements TypeOrmOptionsFactory {
+  constructor(private configService: ConfigService) {}
+
+  createTypeOrmOptions(): TypeOrmModuleOptions {
+    return {
+      type: 'postgres',
+      host: this.configService.get('DB_HOST'),
+      port: this.configService.get('DB_PORT'),
+      username: this.configService.get('DB_USERNAME'),
+      password: this.configService.get('DB_PASSWORD'),
+      database: this.configService.get('DB_DATABASE'),
+      entities: [join(__dirname, '..', '**', '*.entity.{ts,js}')],
+      migrations: [join(__dirname, '..', 'migrations', '*.{ts,js}')],
+      synchronize: false,
+      ssl: this.configService.get('NODE_ENV') === 'production',
+      extra: {
+        // Enable PostGIS extension
+        extensions: ['postgis'],
+      },
+    };
+  }
+}
