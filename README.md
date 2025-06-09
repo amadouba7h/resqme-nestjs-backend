@@ -1,4 +1,4 @@
-# SOS App Backend
+# ResQme Backend
 
 Backend NestJS pour une application mobile de gestion d'alertes SOS.
 
