@@ -206,8 +206,16 @@ export class NotificationProcessor extends WorkerHost {
   }
 
   private async processEmail(data: EmailJobData): Promise<void> {
-    this.logger.log(`Processing email to ${data.to}`);
-    await this.notificationsService.sendEmail(data.to, data.subject, data.html);
+    this.logger.log(
+      `Processing email template ${data.template} to ${data.to}`,
+    );
+    await this.notificationsService.sendEmailWithTemplate(
+      data.to,
+      data.subject,
+      data.template,
+      data.context,
+      data.attachments,
+    );
   }
 
   @OnWorkerEvent('completed')

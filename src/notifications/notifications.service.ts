@@ -8,6 +8,7 @@ import { AlertLocation } from '../sos/entities/alert-location.entity';
 import { AlertResolutionReason } from '../sos/entities/sos-alert.entity';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as handlebars from 'handlebars';
 import { InjectRepository } from '@nestjs/typeorm';
 import { User } from 'src/users/entities/user.entity';
 
@@ -482,5 +483,80 @@ export class NotificationsService {
       return { fcmToken: user.fcmToken };
     }
     return null; // Placeholder
+  }
+
+  async sendEmailWithTemplate(
+    to: string,
+    subject: string,
+    templateName: string,
+    context?: Record<string, any>,
+    attachments?: Array<{
+      filename: string;
+      path: string;
+      cid: string;
+    }>,
+  ): Promise<void> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const templatePath = path.join(
+        process.cwd(),
+        'src',
+        'notifications',
+        'templates',
+        'emails',
+        `${templateName}.hbs`,
+      );
+      const templateSource = await fs.promises.readFile(templatePath, 'utf-8');
+      const template = handlebars.compile(templateSource);
+
+      // Enrich context with default values
+      const fullContext = {
+        appName: this.configService.get('APP_NAME') || 'Votre Application',
+        supportEmail:
+          this.configService.get('SUPPORT_EMAIL') || 'support@example.com',
+        logoCid: 'app-logo', // Default CID for the logo
+        ...context,
+      };
+
+      const html = template(fullContext);
+
+      const mailOptions: nodemailer.SendMailOptions = {
+        from: `${this.appName} <${this.configService.get('SMTP_FROM')}>`,
+        to,
+        subject,
+        html,
+        attachments: attachments || [],
+      };
+
+      // Add logo attachment if it exists and not already in attachments
+      if (
+        fs.existsSync(this.logoPath) &&
+        !mailOptions.attachments.some((att) => att.cid === 'app-logo')
+      ) {
+        mailOptions.attachments.push({
+          filename: 'logo.png',
+          path: this.logoPath,
+          cid: 'app-logo', // Make sure this CID matches what's in your templates
+        });
+      }
+
+      await this.transporter.sendMail(mailOptions);
+      await queryRunner.commitTransaction();
+      this.logger.log(
+        `Email with template ${templateName} sent to ${to} successfully.`,
+      );
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      this.logger.error(
+        `Failed to send email with template ${templateName} to ${to}: ${error.message}`,
+      );
+      // Ne pas relancer l'erreur ici pour que le job BullMQ puisse la gérer
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
   }
 }

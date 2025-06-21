@@ -4,9 +4,11 @@ import {
   Injectable,
   UnauthorizedException,
   BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
+import { NotificationQueueService } from '../notifications/services/notification-queue.service';
 import { ConfigService } from '@nestjs/config';
 import { User, AuthProvider, UserRole } from '../users/entities/user.entity';
 import { RegisterDto } from './dto/register.dto';
@@ -23,6 +25,7 @@ export class AuthService {
     private jwtService: JwtService,
     private configService: ConfigService,
     private dataSource: DataSource,
+    private notificationQueueService: NotificationQueueService,
   ) {
     this.googleClient = new OAuth2Client(
       this.configService.get('GOOGLE_CLIENT_ID'),
@@ -279,6 +282,176 @@ export class AuthService {
         throw error;
       }
       throw new UnauthorizedException('auth.google.invalid_token');
+    }
+  }
+
+  async forgotPassword(email: string): Promise<void> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const user = await this.usersService.findByEmail(email);
+
+      if (!user || user.provider !== AuthProvider.LOCAL) {
+        // Ne pas révéler si l'email existe ou non pour des raisons de sécurité,
+        // ou si le compte n'est pas local.
+        // On fait semblant que l'email a été envoyé.
+        this.logPasswordResetRequest(email, !!user);
+        await queryRunner.commitTransaction(); // Commit pour terminer la transaction même si rien n'est fait.
+        return;
+      }
+
+      // Générer un token de réinitialisation
+      const resetToken = this.jwtService.sign(
+        { sub: user.id, email: user.email },
+        {
+          secret: this.configService.get('JWT_RESET_PASSWORD_SECRET'),
+          expiresIn: this.configService.get('JWT_RESET_PASSWORD_EXPIRATION'),
+        },
+      );
+
+      const expires = new Date();
+      expires.setSeconds(
+        expires.getSeconds() +
+          parseInt(this.configService.get('JWT_RESET_PASSWORD_EXPIRATION')),
+      );
+
+      user.passwordResetToken = resetToken;
+      user.passwordResetExpires = expires;
+
+      await queryRunner.manager.save(User, user);
+
+      // Envoyer l'email de réinitialisation
+      const resetLink = `${this.configService.get(
+        'CLIENT_URL',
+      )}/reset-password?token=${resetToken}`;
+      const appName = this.configService.get('APP_NAME') || 'Votre Application';
+      const expirationTime =
+        this.configService.get('JWT_RESET_PASSWORD_EXPIRATION_HUMAN') ||
+        'un certain temps';
+
+      await this.notificationQueueService.addEmailJob(
+        user.email,
+        `Réinitialisation de mot de passe pour ${appName}`,
+        'reset-password', // Nom du template
+        {
+          firstName: user.firstName,
+          resetLink,
+          appName,
+          expirationTime,
+        },
+      );
+
+      await queryRunner.commitTransaction();
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      // Log l'erreur mais ne la relance pas pour ne pas donner d'indices à un attaquant
+      console.error('Error in forgotPassword:', error);
+      // On peut choisir de ne rien faire ou de lancer une erreur générique si nécessaire
+      // throw new InternalServerErrorException('auth.forgot_password.failed');
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  private logPasswordResetRequest(email: string, userExists: boolean): void {
+    // Simule une opération pour rendre le temps de réponse similaire
+    // que l'utilisateur existe ou non.
+    // Ceci est une mesure de sécurité pour éviter l'énumération d'utilisateurs.
+    const randomDelay = Math.random() * (150 - 50) + 50; // Délai entre 50ms et 150ms
+    setTimeout(() => {
+      if (!userExists) {
+        console.log(
+          `Password reset requested for non-existent or non-local email: ${email}`,
+        );
+      } else {
+        console.log(`Password reset email supposedly sent to: ${email}`);
+      }
+    }, randomDelay);
+  }
+
+  async resetPassword(token: string, newPassword: string): Promise<void> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      let userIdFromToken: string;
+      try {
+        const decodedToken = this.jwtService.verify(token, {
+          secret: this.configService.get('JWT_RESET_PASSWORD_SECRET'),
+        });
+        userIdFromToken = decodedToken.sub;
+      } catch (error) {
+        throw new BadRequestException('auth.reset_password.token_invalid');
+      }
+
+      const user = await queryRunner.manager.findOne(User, {
+        where: {
+          id: userIdFromToken,
+          passwordResetToken: token,
+        },
+      });
+
+      if (!user) {
+        throw new BadRequestException('auth.reset_password.token_invalid');
+      }
+
+      if (
+        !user.passwordResetExpires ||
+        user.passwordResetExpires < new Date()
+      ) {
+        // Effacer le token expiré pour éviter sa réutilisation
+        user.passwordResetToken = null;
+        user.passwordResetExpires = null;
+        await queryRunner.manager.save(User, user);
+        await queryRunner.commitTransaction(); // Commit avant de lancer l'erreur
+        throw new BadRequestException('auth.reset_password.token_expired');
+      }
+
+      // Vérifier si le compte est local
+      if (user.provider !== AuthProvider.LOCAL) {
+        throw new BadRequestException(
+          'auth.reset_password.provider_not_local',
+        );
+      }
+
+      user.password = newPassword; // Le hook @BeforeUpdate s'occupera du hashage
+      user.passwordResetToken = null;
+      user.passwordResetExpires = null;
+
+      // Forcer le hashage du mot de passe si le hook ne se déclenche pas correctement pour une raison ou une autre
+      // (normalement, il devrait avec queryRunner.manager.save)
+      // await user.hashPassword(); // Redondant si le hook fonctionne bien
+
+      await queryRunner.manager.save(User, user);
+      await queryRunner.commitTransaction();
+
+      // Optionnel: envoyer un email de confirmation de changement de mot de passe
+      const appName = this.configService.get('APP_NAME') || 'Votre Application';
+      const supportEmail =
+        this.configService.get('SUPPORT_EMAIL') || 'support@example.com';
+      await this.notificationQueueService.addEmailJob(
+        user.email,
+        `Confirmation de réinitialisation de mot de passe - ${appName}`,
+        'password-reset-confirmation', // Nom du template
+        {
+          firstName: user.firstName,
+          appName,
+          supportEmail,
+        },
+      );
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      // Log l'erreur interne
+      console.error('Error in resetPassword:', error);
+      throw new BadRequestException('auth.reset_password.failed');
+    } finally {
+      await queryRunner.release();
     }
   }
 }
