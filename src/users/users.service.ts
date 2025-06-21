@@ -3,16 +3,19 @@ import {
   NotFoundException,
   ConflictException,
   UnauthorizedException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { User } from './entities/user.entity';
+import { Repository, DataSource } from 'typeorm';
+import { User, AuthProvider } from './entities/user.entity';
 import { TrustedContact } from './entities/trusted-contact.entity';
 import { CreateTrustedContactDto } from './dto/create-trusted-contact.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdatePasswordDto } from './dto/update-password.dto';
 import { UpdateTrustedContactDto } from './dto/update-trusted-contact.dto';
-import * as bcrypt from 'bcrypt';
+import { TrustedContactDto } from './dto/trusted-contact.dto';
+import { AuthService } from 'src/auth/auth.service';
 
 @Injectable()
 export class UsersService {
@@ -21,22 +24,47 @@ export class UsersService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(TrustedContact)
     private readonly trustedContactRepository: Repository<TrustedContact>,
+    @Inject(forwardRef(() => AuthService))
+    private readonly authService: AuthService,
+    private dataSource: DataSource,
   ) {}
 
   async create(userData: Partial<User>): Promise<User> {
-    const existingUser = await this.findByEmail(userData.email!);
-    if (existingUser) {
-      throw new ConflictException('Email already exists');
-    }
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    const user = this.userRepository.create(userData);
-    return this.userRepository.save(user);
+    try {
+      const existingUser = await queryRunner.manager.findOne(User, {
+        where: [
+          { email: userData.email },
+          { providerId: userData.providerId, provider: userData.provider },
+        ],
+      });
+
+      if (existingUser) {
+        throw new ConflictException('auth.email.exists');
+      }
+
+      const user = this.userRepository.create(userData);
+      const savedUser = await queryRunner.manager.save(User, user);
+
+      await queryRunner.commitTransaction();
+      return savedUser;
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
   }
 
-  async findById(id: string): Promise<User> {
+  async findById(id: string, isValidation: boolean = false): Promise<User> {
     const user = await this.userRepository.findOne({ where: { id } });
     if (!user) {
-      throw new NotFoundException('Utilisateur non trouvé');
+      throw isValidation
+        ? new UnauthorizedException()
+        : new NotFoundException('users.not_found');
     }
     return user;
   }
@@ -45,54 +73,122 @@ export class UsersService {
     return this.userRepository.findOne({ where: { email } });
   }
 
+  async findByProviderId(
+    providerId: string,
+    provider: AuthProvider,
+  ): Promise<User | null> {
+    return this.userRepository.findOne({
+      where: { providerId, provider },
+    });
+  }
+
   async update(id: string, userData: Partial<User>): Promise<User> {
     const user = await this.findById(id);
     Object.assign(user, userData);
     return this.userRepository.save(user);
   }
 
-  async updateProfile(
-    userId: string,
-    updateProfileDto: UpdateProfileDto,
-  ): Promise<User> {
-    const user = await this.findById(userId);
+  async updateProfile(userId: string, updateProfileDto: UpdateProfileDto) {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    if (updateProfileDto.email && updateProfileDto.email !== user.email) {
-      const existingUser = await this.findByEmail(updateProfileDto.email);
-      if (existingUser) {
-        throw new ConflictException('Cette adresse email est déjà utilisée');
+    try {
+      const user = await queryRunner.manager.findOne(User, {
+        where: { id: userId },
+      });
+
+      if (!user) {
+        throw new NotFoundException('users.not_found');
       }
-    }
 
-    Object.assign(user, updateProfileDto);
-    return this.userRepository.save(user);
+      if (updateProfileDto.email && updateProfileDto.email !== user.email) {
+        const existingUser = await queryRunner.manager.findOne(User, {
+          where: { email: updateProfileDto.email },
+        });
+        if (existingUser) {
+          throw new ConflictException('users.email.exists');
+        }
+      }
+
+      Object.assign(user, updateProfileDto);
+      const savedUser = await queryRunner.manager.save(User, user);
+      await queryRunner.commitTransaction();
+      return this.authService.login(savedUser);
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
   }
 
   async updatePassword(
     userId: string,
     updatePasswordDto: UpdatePasswordDto,
   ): Promise<void> {
-    const user = await this.findById(userId);
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    const isPasswordValid = await bcrypt.compare(
-      updatePasswordDto.currentPassword,
-      user.password,
-    );
+    try {
+      const user = await queryRunner.manager.findOne(User, {
+        where: { id: userId },
+      });
 
-    if (!isPasswordValid) {
-      throw new UnauthorizedException('Mot de passe actuel incorrect');
+      if (!user) {
+        throw new NotFoundException('users.not_found');
+      }
+
+      if (user.provider !== AuthProvider.LOCAL) {
+        throw new UnauthorizedException('auth.provider.not_local');
+      }
+
+      const isPasswordValid = await user.validatePassword(
+        updatePasswordDto.currentPassword,
+      );
+
+      if (!isPasswordValid) {
+        throw new UnauthorizedException('auth.password.incorrect');
+      }
+
+      user.password = updatePasswordDto.newPassword;
+      await queryRunner.manager.save(User, user);
+
+      await queryRunner.commitTransaction();
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
     }
-
-    const hashedPassword = await bcrypt.hash(updatePasswordDto.newPassword, 10);
-    user.password = hashedPassword;
-
-    await this.userRepository.save(user);
   }
 
   async updateFcmToken(userId: string, fcmToken: string): Promise<User> {
-    const user = await this.findById(userId);
-    user.fcmToken = fcmToken;
-    return this.userRepository.save(user);
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const user = await queryRunner.manager.findOne(User, {
+        where: { id: userId },
+      });
+
+      if (!user) {
+        throw new NotFoundException('users.not_found');
+      }
+
+      user.fcmToken = fcmToken;
+      const savedUser = await queryRunner.manager.save(User, user);
+
+      await queryRunner.commitTransaction();
+      return savedUser;
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
   }
 
   async getTrustedContacts(userId: string): Promise<TrustedContact[]> {
@@ -101,32 +197,48 @@ export class UsersService {
     });
   }
 
-  async addTrustedContacts(
+  async addTrustedContact(
     userId: string,
-    createTrustedContactDtos: CreateTrustedContactDto[],
-  ): Promise<TrustedContact[]> {
-    const user = await this.findById(userId);
+    createTrustedContactDto: CreateTrustedContactDto,
+  ): Promise<TrustedContact> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    const trustedContacts = await Promise.all(
-      createTrustedContactDtos.map(async (dto) => {
-        // Vérifier si l'email correspond à un utilisateur existant
-        const existingUser = await this.findByEmail(dto.email);
+    try {
+      const user = await queryRunner.manager.findOne(User, {
+        where: { id: userId },
+      });
 
-        // Créer le contact avec les préférences de notification appropriées
-        const trustedContact = this.trustedContactRepository.create({
-          ...dto,
-          notificationPreferences: {
-            email: true, // Toujours activer les notifications par email
-            push: existingUser !== null, // Activer les notifications push si l'utilisateur existe
-          },
-          user,
-        });
+      if (!user) {
+        throw new NotFoundException('users.not_found');
+      }
 
-        return trustedContact;
-      }),
-    );
+      const existingUser = await queryRunner.manager.findOne(User, {
+        where: { email: createTrustedContactDto.email },
+      });
 
-    return this.trustedContactRepository.save(trustedContacts);
+      const trustedContact = this.trustedContactRepository.create({
+        ...createTrustedContactDto,
+        notificationPreferences: {
+          email: true,
+          push: existingUser !== null,
+        },
+        user,
+      });
+
+      const savedContact = await queryRunner.manager.save(
+        TrustedContact,
+        trustedContact,
+      );
+      await queryRunner.commitTransaction();
+      return savedContact;
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
   }
 
   async updateTrustedContact(
@@ -134,42 +246,117 @@ export class UsersService {
     contactId: string,
     updateTrustedContactDto: UpdateTrustedContactDto,
   ): Promise<TrustedContact> {
-    const trustedContact = await this.trustedContactRepository.findOne({
-      where: { id: contactId, user: { id: userId } },
-    });
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    if (!trustedContact) {
-      throw new NotFoundException('Contact de confiance non trouvé');
-    }
+    try {
+      const trustedContact = await queryRunner.manager.findOne(TrustedContact, {
+        where: { id: contactId, user: { id: userId } },
+      });
 
-    // Si l'email est mis à jour, vérifier s'il correspond à un utilisateur existant
-    if (
-      updateTrustedContactDto.email &&
-      updateTrustedContactDto.email !== trustedContact.email
-    ) {
-      const existingUser = await this.findByEmail(
-        updateTrustedContactDto.email,
+      if (!trustedContact) {
+        throw new NotFoundException('users.trusted_contact.not_found');
+      }
+
+      if (
+        updateTrustedContactDto.email &&
+        updateTrustedContactDto.email !== trustedContact.email
+      ) {
+        const existingUser = await queryRunner.manager.findOne(User, {
+          where: { email: updateTrustedContactDto.email },
+        });
+        updateTrustedContactDto.notificationPreferences = {
+          email: true,
+          push: existingUser !== null,
+        };
+      }
+
+      Object.assign(trustedContact, updateTrustedContactDto);
+
+      const savedContact = await queryRunner.manager.save(
+        TrustedContact,
+        trustedContact,
       );
 
-      // Mettre à jour les préférences de notification
-      updateTrustedContactDto.notificationPreferences = {
-        email: true, // Toujours activer les notifications par email
-        push: existingUser !== null, // Activer les notifications push si l'utilisateur existe
-      };
+      await queryRunner.commitTransaction();
+      return savedContact;
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
     }
-
-    Object.assign(trustedContact, updateTrustedContactDto);
-    return this.trustedContactRepository.save(trustedContact);
   }
 
   async removeTrustedContact(userId: string, contactId: string): Promise<void> {
-    const result = await this.trustedContactRepository.delete({
-      id: contactId,
-      user: { id: userId },
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const result = await queryRunner.manager.softDelete(TrustedContact, {
+        id: contactId,
+        user: { id: userId },
+      });
+
+      if (result.affected === 0) {
+        throw new NotFoundException('users.trusted_contact.not_found');
+      }
+
+      await queryRunner.commitTransaction();
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  async search(userId: string, query: string): Promise<Partial<User>[]> {
+    const results = await this.userRepository
+      .createQueryBuilder('user')
+      .where(
+        '(user.id <> :userId AND (LOWER(user.firstName) LIKE LOWER(:query) OR LOWER(user.lastName) LIKE LOWER(:query) OR LOWER(user.email) LIKE LOWER(:query) OR LOWER(user.phoneNumber) LIKE LOWER(:query)))',
+        { query: `%${query}%`, userId },
+      )
+      .getMany();
+
+    return results.map((user) => {
+      const { password, ...userData } = user;
+      return userData;
+    });
+  }
+
+  async getUserContacts(userId: string): Promise<TrustedContactDto[]> {
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+      relations: ['trustedContacts'],
     });
 
-    if (result.affected === 0) {
-      throw new NotFoundException('Contact de confiance non trouvé');
+    if (!user) {
+      throw new NotFoundException('users.not_found');
     }
+
+    // Récupérer les utilisateurs correspondant aux contacts de confiance
+    const contacts = await Promise.all(
+      user.trustedContacts.map(async (contact) => {
+        const userContact = await this.findByEmail(contact.email);
+
+        return {
+          id: contact.id,
+          name: contact.name,
+          email: contact.email,
+          phoneNumber: contact.phoneNumber,
+          isAppUser: userContact != null,
+          notificationPreferences: contact.notificationPreferences,
+          user: contact.user,
+          createdAt: contact.createdAt,
+          updatedAt: contact.updatedAt,
+        } as TrustedContactDto;
+      }),
+    );
+
+    return contacts;
   }
 }

@@ -28,7 +28,7 @@ export class AlertLocation extends BaseEntity {
   @Column({ type: 'float', nullable: true })
   heading: number;
 
-  @Column()
+  @Column({ name: 'alert_id', type: 'uuid' })
   alertId: string;
 
   @ManyToOne(() => SosAlert, (alert) => alert.locations)

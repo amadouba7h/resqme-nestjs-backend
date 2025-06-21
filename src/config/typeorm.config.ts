@@ -2,6 +2,7 @@ import { DataSource } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { config } from 'dotenv';
 import { join } from 'path';
+import { SnakeNamingStrategy } from 'typeorm-naming-strategies';
 
 config();
 
@@ -18,6 +19,7 @@ export default new DataSource({
   migrations: [join(__dirname, '..', 'migrations', '*.{ts,js}')],
   synchronize: false,
   ssl: configService.get('NODE_ENV') === 'production',
+  namingStrategy: new SnakeNamingStrategy(),
   extra: {
     // Enable PostGIS extension
     extensions: ['postgis'],

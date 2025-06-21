@@ -25,14 +25,14 @@ export class AlertNotification {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  @Column({ name: 'alert_id', type: 'uuid' })
   alertId: string;
 
   @ManyToOne(() => SosAlert, (alert) => alert.notifications)
-  @JoinColumn({ name: 'alertId' })
+  @JoinColumn({ name: 'alert_id' })
   alert: SosAlert;
 
-  @Column()
+  @Column({ name: 'recipient_id', type: 'uuid' })
   recipientId: string;
 
   @Column({
@@ -62,6 +62,6 @@ export class AlertNotification {
     };
   };
 
-  @CreateDateColumn()
+  @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 }

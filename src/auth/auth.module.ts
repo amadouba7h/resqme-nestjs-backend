@@ -1,26 +1,26 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
-import { JwtStrategy } from './strategies/jwt.strategy';
-import { LocalStrategy } from './strategies/local.strategy';
 import { UsersModule } from '../users/users.module';
-import { WsJwtGuard } from './guards/ws-jwt.guard';
-import { JwtAuthGuard } from './guards/jwt-auth.guard';
-import { LocalAuthGuard } from './guards/local-auth.guard';
+import { JwtStrategy } from './strategies/jwt.strategy';
+import { GoogleStrategy } from './strategies/google.strategy';
+import { RefreshTokenStrategy } from './strategies/refresh-token.strategy';
+import { LocalStrategy } from './strategies/local.strategy';
+import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
 
 @Module({
   imports: [
-    UsersModule,
+    forwardRef(() => UsersModule),
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
-        secret: configService.get('JWT_SECRET'),
+        secret: configService.get<string>('JWT_SECRET'),
         signOptions: {
-          expiresIn: configService.get('JWT_EXPIRATION', '1h'),
+          expiresIn: configService.get<string>('JWT_EXPIRATION', '1h'),
         },
       }),
       inject: [ConfigService],
@@ -29,12 +29,14 @@ import { LocalAuthGuard } from './guards/local-auth.guard';
   controllers: [AuthController],
   providers: [
     AuthService,
-    LocalStrategy,
     JwtStrategy,
-    WsJwtGuard,
-    JwtAuthGuard,
-    LocalAuthGuard,
+    RefreshTokenStrategy,
+    GoogleStrategy,
+    LocalStrategy,
+    JwtRefreshGuard,
+    // GithubStrategy,
+    // FacebookStrategy,
   ],
-  exports: [AuthService, JwtAuthGuard, LocalAuthGuard, WsJwtGuard, JwtModule],
+  exports: [AuthService],
 })
 export class AuthModule {}

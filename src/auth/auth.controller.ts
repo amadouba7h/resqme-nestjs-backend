@@ -6,10 +6,12 @@ import {
   Get,
   Request,
   HttpStatus,
+  Req,
+  HttpCode,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { LocalAuthGuard } from './guards/local-auth.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
 import {
   ApiTags,
   ApiOperation,
@@ -20,6 +22,8 @@ import {
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { User } from '../users/entities/user.entity';
+import { AuthGuard } from '@nestjs/passport';
+import { LocalAuthGuard } from './guards/local-auth.guard';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -51,12 +55,12 @@ export class AuthController {
     schema: {
       type: 'object',
       properties: {
-        access_token: {
+        accessToken: {
           type: 'string',
           example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
           description: "Token JWT pour l'authentification",
         },
-        refresh_token: {
+        refreshToken: {
           type: 'string',
           example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
           description: 'Token JWT pour le rafraîchissement',
@@ -106,8 +110,10 @@ export class AuthController {
       },
     },
   })
-  login(@Body() loginDto: LoginDto) {
-    return this.authService.login(loginDto);
+  @UseGuards(LocalAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async login(@Request() req, @Body() loginDto: LoginDto) {
+    return this.authService.login(req.user);
   }
 
   @Post('register')
@@ -137,12 +143,12 @@ export class AuthController {
     schema: {
       type: 'object',
       properties: {
-        access_token: {
+        accessToken: {
           type: 'string',
           example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
           description: "Token JWT pour l'authentification",
         },
-        refresh_token: {
+        refreshToken: {
           type: 'string',
           example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
           description: 'Token JWT pour le rafraîchissement',
@@ -258,9 +264,9 @@ export class AuthController {
     return req.user;
   }
 
+  @UseGuards(JwtRefreshGuard)
   @Post('refresh')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: "Rafraîchir le token d'accès",
     description:
@@ -272,7 +278,7 @@ export class AuthController {
     schema: {
       type: 'object',
       properties: {
-        access_token: {
+        accessToken: {
           type: 'string',
           example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
           description: "Nouveau token JWT pour l'authentification",
@@ -299,5 +305,130 @@ export class AuthController {
   })
   async refreshToken(@Request() req) {
     return this.authService.refreshToken(req.user);
+  }
+
+  @Post('google')
+  @ApiOperation({
+    summary: 'Authentification Google',
+    description: 'Authentifie un utilisateur avec un token Google',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        token: {
+          type: 'string',
+          description: 'Token Google ID',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Authentification réussie',
+    schema: {
+      type: 'object',
+      properties: {
+        accessToken: {
+          type: 'string',
+          example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+          description: "Token JWT pour l'authentification",
+        },
+        refreshToken: {
+          type: 'string',
+          example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+          description: 'Token JWT pour le rafraîchissement',
+        },
+        user: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              example: '123e4567-e89b-12d3-a456-426614174000',
+              description: "Identifiant unique de l'utilisateur",
+            },
+            email: {
+              type: 'string',
+              example: 'user@example.com',
+              description: "Email de l'utilisateur",
+            },
+            firstName: {
+              type: 'string',
+              example: 'John',
+              description: "Prénom de l'utilisateur",
+            },
+            lastName: {
+              type: 'string',
+              example: 'Doe',
+              description: "Nom de l'utilisateur",
+            },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'Token Google invalide',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: {
+          type: 'number',
+          example: 401,
+        },
+        message: {
+          type: 'string',
+          example: 'Token Google invalide',
+        },
+      },
+    },
+  })
+  async googleAuth(@Body('idToken') idToken: string) {
+    return this.authService.validateGoogleToken(idToken);
+  }
+
+  @Post('logout')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Déconnexion utilisateur',
+    description:
+      "Déconnecte l'utilisateur en invalidant son token de rafraîchissement",
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Déconnexion réussie',
+    schema: {
+      type: 'object',
+      properties: {
+        message: {
+          type: 'string',
+          example: 'Déconnexion réussie',
+          description: 'Message de confirmation de déconnexion',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'Non authentifié',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: {
+          type: 'number',
+          example: 401,
+        },
+        message: {
+          type: 'string',
+          example: 'Token JWT invalide ou expiré',
+        },
+      },
+    },
+  })
+  async logout(@Request() req) {
+    await this.authService.logout(req.user.id);
+    return { message: 'logged_out_succesfully' };
   }
 }

@@ -2,8 +2,6 @@ import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
-  CreateDateColumn,
-  UpdateDateColumn,
   OneToMany,
   BeforeInsert,
   BeforeUpdate,
@@ -19,6 +17,13 @@ export enum UserRole {
   ADMIN = 'admin',
 }
 
+export enum AuthProvider {
+  LOCAL = 'local',
+  GOOGLE = 'google',
+  GITHUB = 'github',
+  FACEBOOK = 'facebook',
+}
+
 @Entity('users')
 export class User extends BaseEntity {
   @PrimaryGeneratedColumn('uuid')
@@ -27,18 +32,18 @@ export class User extends BaseEntity {
   @Column({ unique: true })
   email: string;
 
-  @Column()
+  @Column({ name: 'first_name' })
   firstName: string;
 
-  @Column()
+  @Column({ name: 'last_name' })
   lastName: string;
 
-  @Column({ nullable: true })
-  phoneNumber: string;
+  @Column({ name: 'phone_number', nullable: true })
+  phoneNumber?: string;
 
-  @Column({ nullable: true })
+  @Column({ name: 'fcm_token', nullable: true })
   @Exclude()
-  fcmToken: string;
+  fcmToken?: string;
 
   @Column({
     type: 'enum',
@@ -47,12 +52,34 @@ export class User extends BaseEntity {
   })
   role: UserRole;
 
-  @Column({ default: true })
+  @Column({
+    type: 'enum',
+    enum: AuthProvider,
+    default: AuthProvider.LOCAL,
+  })
+  provider: AuthProvider;
+
+  @Column({ name: 'provider_id', nullable: true })
+  providerId: string;
+
+  @Column({ name: 'is_active', default: true })
   isActive: boolean;
 
-  @Column()
+  @Column({ nullable: true })
   @Exclude()
-  password: string;
+  password?: string;
+
+  @Column({ name: 'refresh_token', nullable: true, type: 'text' })
+  @Exclude()
+  refreshToken?: string | null;
+
+  @Column({ name: 'password_reset_token', nullable: true })
+  @Exclude()
+  passwordResetToken?: string | null;
+
+  @Column({ name: 'password_reset_expires', nullable: true })
+  @Exclude()
+  passwordResetExpires?: Date | null;
 
   @OneToMany(() => TrustedContact, (contact) => contact.user)
   trustedContacts: TrustedContact[];
@@ -69,6 +96,7 @@ export class User extends BaseEntity {
   }
 
   async validatePassword(password: string): Promise<boolean> {
+    if (!this.password) return false;
     return await bcrypt.compare(password, this.password);
   }
 }

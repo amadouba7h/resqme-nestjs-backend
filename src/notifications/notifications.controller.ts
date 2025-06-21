@@ -15,19 +15,6 @@ import {
 export class NotificationsController {
   constructor(private notificationsService: NotificationsService) {}
 
-  @Post('fcm-token')
-  @ApiOperation({ summary: 'Update FCM token for push notifications' })
-  @ApiResponse({ status: 200, description: 'FCM token updated successfully' })
-  async updateFcmToken(@Request() req, @Body('fcmToken') fcmToken: string) {
-    // Implement FCM token update logic here
-    await new Promise<void>((resolve, reject) => {
-      setTimeout(() => {
-        resolve();
-      }, 1000);
-    });
-    return { message: 'FCM token updated successfully' };
-  }
-
   @Post('test-push')
   @ApiOperation({ summary: 'Send test push notification' })
   @ApiResponse({

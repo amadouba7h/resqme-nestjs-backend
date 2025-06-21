@@ -1,10 +1,4 @@
-import {
-  IsEmail,
-  IsString,
-  IsPhoneNumber,
-  IsBoolean,
-  IsOptional,
-} from 'class-validator';
+import { IsEmail, IsString, IsBoolean, IsOptional } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateTrustedContactDto {
@@ -26,17 +20,9 @@ export class CreateTrustedContactDto {
     example: '+22370540470',
     description: 'Numéro de téléphone du contact de confiance',
   })
-  @IsString()
-  phoneNumber: string;
-
-  @ApiProperty({
-    example: true,
-    description: "Indique si le contact est un utilisateur de l'application",
-    default: false,
-  })
-  @IsBoolean()
   @IsOptional()
-  isAppUser?: boolean;
+  @IsString()
+  phoneNumber?: string;
 
   @ApiProperty({
     example: {

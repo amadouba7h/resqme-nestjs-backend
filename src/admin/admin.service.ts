@@ -41,7 +41,7 @@ export class AdminService {
       relations: ['trustedContacts'],
     });
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException('admin.user.not_found');
     }
     return user;
   }
@@ -98,7 +98,7 @@ export class AdminService {
       relations: ['user', 'locations', 'notifications'],
     });
     if (!alert) {
-      throw new NotFoundException('Alert not found');
+      throw new NotFoundException('admin.alert.not_found');
     }
     return alert;
   }

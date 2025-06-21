@@ -6,9 +6,11 @@ import {
   Patch,
   Param,
   Delete,
-  UseGuards,
   Request,
+  UseGuards,
   HttpStatus,
+  Query,
+  Req,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -26,6 +28,7 @@ import { UpdatePasswordDto } from './dto/update-password.dto';
 import { User } from './entities/user.entity';
 import { TrustedContact } from './entities/trusted-contact.entity';
 import { UpdateTrustedContactDto } from './dto/update-trusted-contact.dto';
+import { TrustedContactDto } from './dto/trusted-contact.dto';
 
 @ApiTags('users')
 @Controller('users')
@@ -152,7 +155,7 @@ export class UsersController {
   async updateProfile(
     @Request() req,
     @Body() updateProfileDto: UpdateProfileDto,
-  ): Promise<User> {
+  ) {
     return this.usersService.updateProfile(req.user.id, updateProfileDto);
   }
 
@@ -234,7 +237,7 @@ export class UsersController {
     @Body() updatePasswordDto: UpdatePasswordDto,
   ): Promise<{ message: string }> {
     await this.usersService.updatePassword(req.user.id, updatePasswordDto);
-    return { message: 'Mot de passe mis à jour avec succès' };
+    return { message: 'auth.password_updated_successfully' };
   }
 
   @Patch('fcm-token')
@@ -317,7 +320,6 @@ export class UsersController {
             name: 'John Doe',
             email: 'john@example.com',
             phoneNumber: '+22370540470',
-            isAppUser: true,
             notificationPreferences: {
               email: true,
               sms: true,
@@ -328,7 +330,6 @@ export class UsersController {
             name: 'Jane Smith',
             email: 'jane@example.com',
             phoneNumber: '+22370575247',
-            isAppUser: false,
             notificationPreferences: {
               email: true,
               sms: false,
@@ -385,13 +386,13 @@ export class UsersController {
       },
     },
   })
-  async addTrustedContacts(
+  async addTrustedContact(
     @Request() req,
-    @Body() createTrustedContactDtos: CreateTrustedContactDto[],
-  ): Promise<TrustedContact[]> {
-    return this.usersService.addTrustedContacts(
+    @Body() createTrustedContactDto: CreateTrustedContactDto,
+  ): Promise<TrustedContact> {
+    return this.usersService.addTrustedContact(
       req.user.id,
-      createTrustedContactDtos,
+      createTrustedContactDto,
     );
   }
 
@@ -594,5 +595,89 @@ export class UsersController {
     @Param('id') id: string,
   ): Promise<void> {
     return this.usersService.removeTrustedContact(req.user.id, id);
+  }
+
+  @Get('search')
+  @ApiOperation({
+    summary: 'Rechercher des utilisateurs',
+    description: 'Recherche des utilisateurs par nom, prénom ou email',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Liste des utilisateurs trouvés',
+    type: [User],
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'Non authentifié',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: {
+          type: 'number',
+          example: 401,
+        },
+        message: {
+          type: 'string',
+          example: 'auth.token.invalid',
+        },
+      },
+    },
+  })
+  async search(
+    @Req() req,
+    @Query('query') query: string,
+  ): Promise<Partial<User>[]> {
+    return await this.usersService.search(req.user.id, query);
+  }
+
+  @Get(':userId/trusted-contacts')
+  @ApiOperation({
+    summary: "Obtenir les contacts d'un utilisateur",
+    description: "Récupère la liste des contacts de confiance d'un utilisateur",
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Liste des contacts récupérée avec succès',
+    type: [TrustedContactDto],
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Utilisateur non trouvé',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: {
+          type: 'number',
+          example: 404,
+        },
+        message: {
+          type: 'string',
+          example: 'users.not_found',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'Non authentifié',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: {
+          type: 'number',
+          example: 401,
+        },
+        message: {
+          type: 'string',
+          example: 'auth.token.invalid',
+        },
+      },
+    },
+  })
+  async getUserContacts(
+    @Param('userId') userId: string,
+  ): Promise<TrustedContactDto[]> {
+    return this.usersService.getUserContacts(userId);
   }
 }

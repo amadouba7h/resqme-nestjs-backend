@@ -32,14 +32,14 @@ export class TrustedContact extends BaseEntity {
   })
   email: string;
 
-  @Column()
+  @Column({ name: 'phone_number', nullable: true })
   @ApiProperty({
     description: 'Numéro de téléphone du contact de confiance',
     example: '+22370540470',
   })
-  phoneNumber: string;
+  phoneNumber?: string;
 
-  @Column('jsonb', { nullable: true })
+  @Column('jsonb', { name: 'notification_preferences', nullable: true })
   @ApiProperty({
     description: 'Préférences de notification',
     example: {
@@ -53,6 +53,9 @@ export class TrustedContact extends BaseEntity {
     sms: boolean;
     push: boolean;
   };
+
+  @Column({ name: 'user_id', type: 'uuid' })
+  userId: string;
 
   @ManyToOne(() => User, (user) => user.trustedContacts)
   @JoinColumn({ name: 'user_id' })

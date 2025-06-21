@@ -9,6 +9,7 @@ import { Server, Socket } from 'socket.io';
 import { UseGuards } from '@nestjs/common';
 import { WsJwtGuard } from '../auth/guards/ws-jwt.guard';
 import { AlertLocation } from './entities/alert-location.entity';
+import { JwtService } from '@nestjs/jwt';
 
 @WebSocketGateway({
   cors: {
@@ -21,6 +22,8 @@ export class SosGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private userSockets: Map<string, Socket[]> = new Map();
 
+  constructor(private jwtService: JwtService) {}
+
   async handleConnection(client: Socket) {
     try {
       const token = client.handshake.auth.token;
@@ -30,19 +33,19 @@ export class SosGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       // Verify token and get user ID
-      const userId = await this.verifyToken(token);
-      if (!userId) {
+      const user = await this.jwtService.verify(token);
+      if (!user) {
         client.disconnect();
         return;
       }
 
       // Store socket connection
-      const userSockets = this.userSockets.get(userId) || [];
+      const userSockets = this.userSockets.get(user.id) || [];
       userSockets.push(client);
-      this.userSockets.set(userId, userSockets);
+      this.userSockets.set(user.id, userSockets);
 
       // Join user's room
-      client.join(`user:${userId}`);
+      client.join(`user:${user}`);
     } catch (error) {
       client.disconnect();
     }
@@ -79,16 +82,5 @@ export class SosGateway implements OnGatewayConnection, OnGatewayDisconnect {
       alertId,
       location,
     });
-  }
-
-  private async verifyToken(token: string): Promise<string | null> {
-    // Implement token verification logic here
-    // Return user ID if token is valid, null otherwise
-    await new Promise<void>((resolve, reject) => {
-      setTimeout(() => {
-        resolve();
-      }, 1000);
-    });
-    return null; // Placeholder
   }
 }

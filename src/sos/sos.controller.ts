@@ -6,8 +6,10 @@ import {
   Request,
   Get,
   Param,
-  Patch,
   HttpStatus,
+  Query,
+  Put,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { SosService } from './sos.service';
@@ -18,11 +20,13 @@ import {
   ApiBearerAuth,
   ApiParam,
   ApiBody,
+  ApiQuery,
 } from '@nestjs/swagger';
 import { CreateAlertDto } from './dto/create-alert.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { SosAlert } from './entities/sos-alert.entity';
 import { AlertLocation } from './entities/alert-location.entity';
+import { ResolveAlertDto } from './dto/resolve-alert.dto';
 
 @ApiTags('sos')
 @Controller('sos')
@@ -114,7 +118,7 @@ export class SosController {
     return this.sosService.createAlert(req.user.id, createAlertDto);
   }
 
-  @Patch('alerts/:id/location')
+  @Put('alerts/:id/location')
   @ApiOperation({
     summary: "Mettre à jour la localisation d'une alerte",
     description: "Met à jour la position géographique d'une alerte SOS active",
@@ -203,24 +207,30 @@ export class SosController {
       },
     },
   })
-  updateLocation(
+  async updateLocation(
     @Request() req,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() updateLocationDto: UpdateLocationDto,
   ): Promise<AlertLocation> {
     return this.sosService.updateLocation(req.user.id, id, updateLocationDto);
   }
 
-  @Patch('alerts/:id/resolve')
+  @Put('alerts/:id/resolve')
   @ApiOperation({
     summary: 'Résoudre une alerte SOS',
-    description: 'Marque une alerte SOS comme résolue',
+    description:
+      "Marque une alerte SOS comme résolue, permet d'évaluer les contacts qui ont aidé et notifie les contacts de confiance",
   })
   @ApiParam({
     name: 'id',
-    description: "ID de l'alerte",
+    description: "ID de l'alerte à résoudre",
     type: 'string',
     example: '123e4567-e89b-12d3-a456-426614174000',
+  })
+  @ApiBody({
+    type: ResolveAlertDto,
+    description:
+      "Informations de résolution de l'alerte avec les évaluations optionnelles des contacts",
   })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -263,9 +273,10 @@ export class SosController {
   })
   async resolveAlert(
     @Request() req,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() resolveAlertDto: ResolveAlertDto,
   ): Promise<SosAlert> {
-    return this.sosService.resolveAlert(req.user.id, id);
+    return this.sosService.resolveAlert(req.user.id, id, resolveAlertDto);
   }
 
   @Get('alerts/active')
@@ -314,5 +325,132 @@ export class SosController {
   })
   async getActiveAlert(@Request() req): Promise<SosAlert | null> {
     return await this.sosService.getActiveAlert(req.user.id);
+  }
+
+  @Get('alerts/:id/locations')
+  @ApiOperation({ summary: 'Get alert locations' })
+  @ApiResponse({ status: 200, description: 'Returns alert locations' })
+  async getAlertLocations(
+    @Request() req,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<AlertLocation[]> {
+    return this.sosService.getAlertLocations(id, req.user.id);
+  }
+
+  @Get('alerts/history')
+  @ApiOperation({
+    summary: "Obtenir l'historique des alertes d'un utilisateur",
+    description:
+      "Récupère l'historique des alertes SOS d'un utilisateur avec pagination",
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Historique des alertes récupéré avec succès',
+    schema: {
+      type: 'object',
+      properties: {
+        alerts: {
+          type: 'array',
+          items: { $ref: '#/components/schemas/SosAlert' },
+        },
+        total: {
+          type: 'number',
+          description: "Nombre total d'alertes",
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'Non authentifié',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: {
+          type: 'number',
+          example: 401,
+        },
+        message: {
+          type: 'string',
+          example: 'auth.token.invalid',
+        },
+      },
+    },
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Numéro de la page (défaut: 1)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: "Nombre d'éléments par page (défaut: 10)",
+  })
+  async getUserAlertHistory(
+    @Request() req,
+    @Query('page') page: number = 1,
+    @Query('limit') limit: number = 10,
+  ): Promise<{ alerts: SosAlert[]; total: number }> {
+    return this.sosService.getUserAlertHistory(req.user.id, page, limit);
+  }
+
+  @Get('alerts/:id')
+  @ApiOperation({
+    summary: 'Obtenir une alerte spécifique',
+    description: "Récupère les détails d'une alerte SOS par son ID",
+  })
+  @ApiParam({
+    name: 'id',
+    description: "ID de l'alerte",
+    type: 'string',
+    example: '123e4567-e89b-12d3-a456-426614174000',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Alerte récupérée avec succès',
+    type: SosAlert,
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Alerte non trouvée',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: {
+          type: 'number',
+          example: 404,
+        },
+        message: {
+          type: 'string',
+          example: 'Alerte non trouvée',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'Non authentifié',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: {
+          type: 'number',
+          example: 401,
+        },
+        message: {
+          type: 'string',
+          example: 'Token JWT invalide ou expiré',
+        },
+      },
+    },
+  })
+  async getAlert(
+    @Request() req,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<SosAlert> {
+    return this.sosService.getAlert(id, req.user.id);
   }
 }

@@ -4,14 +4,25 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { SosAlert, AlertStatus } from './entities/sos-alert.entity';
+import { Repository, DataSource, QueryRunner } from 'typeorm';
+import {
+  SosAlert,
+  AlertStatus,
+  AlertResolutionReason,
+} from './entities/sos-alert.entity';
 import { AlertLocation } from './entities/alert-location.entity';
-import { AlertNotification } from './entities/alert-notification.entity';
+import {
+  AlertNotification,
+  NotificationStatus,
+  NotificationType,
+} from './entities/alert-notification.entity';
 import { CreateAlertDto } from './dto/create-alert.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
-import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationQueueService } from '../notifications/services/notification-queue.service';
 import { UsersService } from '../users/users.service';
+import { User } from 'src/users/entities/user.entity';
+import { AlertRatingService } from './services/alert-rating.service';
+import { ResolveAlertDto } from './dto/resolve-alert.dto';
 
 @Injectable()
 export class SosService {
@@ -22,76 +33,191 @@ export class SosService {
     private locationsRepository: Repository<AlertLocation>,
     @InjectRepository(AlertNotification)
     private notificationsRepository: Repository<AlertNotification>,
-    private notificationsService: NotificationsService,
+    @InjectRepository(User)
+    private usersRepository: Repository<User>,
+    private notificationQueueService: NotificationQueueService,
     private usersService: UsersService,
+    private alertRatingService: AlertRatingService,
+    private dataSource: DataSource,
   ) {}
 
   async createAlert(
     userId: string,
     createAlertDto: CreateAlertDto,
   ): Promise<SosAlert> {
-    const alert = this.alertsRepository.create({
-      userId,
-      status: AlertStatus.ACTIVE,
-      startedAt: new Date(),
-      description: createAlertDto.description,
-    });
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    const savedAlert = await this.alertsRepository.save(alert);
-    await this.notifyTrustedContacts(savedAlert);
-    return savedAlert;
+    try {
+      // Vérifier si l'utilisateur a déjà une alerte active
+      const existingAlert = await queryRunner.manager.findOne(SosAlert, {
+        where: { userId, status: AlertStatus.ACTIVE },
+      });
+
+      if (existingAlert) {
+        throw new BadRequestException('sos.alert.already_active');
+      }
+
+      const alert = this.alertsRepository.create({
+        userId,
+        status: AlertStatus.ACTIVE,
+        startedAt: new Date(),
+        description: createAlertDto.description,
+      });
+
+      const savedAlert = await queryRunner.manager.save(SosAlert, alert);
+
+      // Créer et sauvegarder la position initiale
+      const initialLocation = this.locationsRepository.create({
+        alertId: savedAlert.id,
+        location: {
+          type: 'Point',
+          coordinates: [createAlertDto.longitude, createAlertDto.latitude],
+        },
+        accuracy: createAlertDto.accuracy,
+        speed: createAlertDto.speed,
+        heading: createAlertDto.heading,
+      });
+
+      const savedLocation = await queryRunner.manager.save(
+        AlertLocation,
+        initialLocation,
+      );
+
+      await queryRunner.commitTransaction();
+
+      // Notifier les contacts avec la position initiale (après la transaction)
+      const user = await this.usersService.findById(savedAlert.userId);
+      const contacts = await this.usersService.getTrustedContacts(
+        savedAlert.userId,
+      );
+      const userName = `${user.firstName} ${user.lastName}`;
+
+      await this.notificationQueueService.addSosAlertJob(
+        savedAlert,
+        userName,
+        contacts,
+        savedLocation,
+      );
+
+      return savedAlert;
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
   }
 
   async updateLocation(
-    alertId: string,
     userId: string,
+    alertId: string,
     updateLocationDto: UpdateLocationDto,
   ): Promise<AlertLocation> {
-    const alert = await this.alertsRepository.findOne({
-      where: { id: alertId, userId },
-    });
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    if (!alert) {
-      throw new NotFoundException('Alert not found');
-    }
+    try {
+      const alert = await queryRunner.manager.findOne(SosAlert, {
+        where: { id: alertId, userId },
+      });
 
-    if (alert.status !== AlertStatus.ACTIVE) {
-      throw new BadRequestException(
-        'Cannot update location for non-active alert',
+      if (!alert) {
+        throw new NotFoundException('sos.alert.not_found');
+      }
+
+      if (alert.status !== AlertStatus.ACTIVE) {
+        throw new BadRequestException('sos.alert.location_update_inactive');
+      }
+
+      const location = this.locationsRepository.create({
+        alertId: alert.id,
+        location: {
+          type: 'Point',
+          coordinates: [
+            updateLocationDto.longitude,
+            updateLocationDto.latitude,
+          ],
+        },
+        accuracy: updateLocationDto.accuracy,
+        speed: updateLocationDto.speed,
+        heading: updateLocationDto.heading,
+      });
+
+      const savedLocation = await queryRunner.manager.save(
+        AlertLocation,
+        location,
       );
+      await queryRunner.commitTransaction();
+      return savedLocation;
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
     }
-
-    const location = this.locationsRepository.create({
-      alertId: alert.id,
-      location: {
-        type: 'Point',
-        coordinates: [updateLocationDto.longitude, updateLocationDto.latitude],
-      },
-      accuracy: updateLocationDto.accuracy,
-      speed: updateLocationDto.speed,
-      heading: updateLocationDto.heading,
-      timestamp: new Date(),
-    } as unknown as AlertLocation);
-
-    return await this.locationsRepository.save(location);
   }
 
-  async resolveAlert(alertId: string, userId: string): Promise<SosAlert> {
-    const alert = await this.alertsRepository.findOne({
-      where: { id: alertId, userId },
-    });
+  async resolveAlert(
+    userId: string,
+    alertId: string,
+    resolveAlertDto: ResolveAlertDto,
+  ): Promise<SosAlert> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    if (!alert) {
-      throw new NotFoundException('Alert not found');
+    try {
+      const alert = await queryRunner.manager.findOne(SosAlert, {
+        where: { id: alertId, userId },
+      });
+
+      if (!alert) {
+        throw new NotFoundException('sos.alert.not_found');
+      }
+
+      if (alert.status !== AlertStatus.ACTIVE) {
+        throw new BadRequestException('sos.alert.not_active');
+      }
+
+      alert.status = AlertStatus.RESOLVED;
+      alert.resolvedAt = new Date();
+      alert.resolutionReason = resolveAlertDto.resolutionReason;
+
+      const savedAlert = await queryRunner.manager.save(SosAlert, alert);
+
+      // Créer les évaluations si elles sont fournies
+      if (resolveAlertDto.ratings && resolveAlertDto.ratings.length > 0) {
+        await this.alertRatingService.createMultipleRatings(
+          savedAlert,
+          resolveAlertDto.ratings,
+        );
+      }
+
+      await queryRunner.commitTransaction();
+
+      // Notifier les contacts de confiance de la résolution (après la transaction)
+      const user = await this.usersService.findById(savedAlert.userId);
+      const contacts = await this.usersService.getTrustedContacts(
+        savedAlert.userId,
+      );
+      const userName = `${user.firstName} ${user.lastName}`;
+
+      await this.notificationQueueService.addSosResolvedJob(
+        savedAlert,
+        userName,
+        contacts,
+      );
+
+      return savedAlert;
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
     }
-
-    if (alert.status !== AlertStatus.ACTIVE) {
-      throw new BadRequestException('Alert is not active');
-    }
-
-    alert.status = AlertStatus.RESOLVED;
-    alert.resolvedAt = new Date();
-    return this.alertsRepository.save(alert);
   }
 
   getActiveAlert(userId: string): Promise<SosAlert | null> {
@@ -100,6 +226,19 @@ export class SosService {
       relations: ['locations'],
       order: { createdAt: 'DESC' },
     });
+  }
+
+  async getAlert(alertId: string, userId: string): Promise<SosAlert> {
+    const alert = await this.alertsRepository.findOne({
+      where: { id: alertId, userId },
+      relations: ['locations', 'notifications'],
+    });
+
+    if (!alert) {
+      throw new NotFoundException('sos.alert.not_found');
+    }
+
+    return alert;
   }
 
   async getAlertLocations(
@@ -111,7 +250,7 @@ export class SosService {
     });
 
     if (!alert) {
-      throw new NotFoundException('Alert not found');
+      throw new NotFoundException('sos.alert.not_found');
     }
 
     return this.locationsRepository.find({
@@ -120,44 +259,24 @@ export class SosService {
     });
   }
 
-  private async notifyTrustedContacts(alert: SosAlert): Promise<void> {
-    const user = await this.usersService.findById(alert.userId);
-    const contacts = await this.usersService.getTrustedContacts(alert.userId);
+  async getUserAlertHistory(
+    userId: string,
+    page: number = 1,
+    limit: number = 10,
+  ): Promise<{ alerts: SosAlert[]; total: number }> {
+    const [alerts, total] = await this.alertsRepository.findAndCount({
+      where: { userId },
+      relations: ['locations', 'notifications'],
+      order: {
+        createdAt: 'DESC',
+      },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
 
-    for (const contact of contacts) {
-      const notification = this.notificationsRepository.create({
-        alertId: alert.id,
-        recipientId: contact.id,
-        type: 'alert_created',
-        status: 'pending',
-      } as unknown as AlertNotification);
-
-      await this.notificationsRepository.save(notification);
-
-      // Send notifications based on preferences
-      if (contact.notificationPreferences.email) {
-        await this.notificationsService.sendEmail(
-          contact.email,
-          'Nouvelle alerte SOS',
-          `${user.firstName} ${user.lastName} a déclenché une alerte SOS.`,
-        );
-      }
-
-      if (contact.notificationPreferences.sms) {
-        await this.notificationsService.sendSMS(
-          contact.phoneNumber,
-          `${user.firstName} ${user.lastName} a déclenché une alerte SOS.`,
-        );
-      }
-
-      if (contact.notificationPreferences.push) {
-        await this.notificationsService.sendPushNotification(
-          contact.id,
-          'Nouvelle alerte SOS',
-          `${user.firstName} ${user.lastName} a déclenché une alerte SOS.`,
-          { alertId: alert.id },
-        );
-      }
-    }
+    return {
+      alerts,
+      total,
+    };
   }
 }
