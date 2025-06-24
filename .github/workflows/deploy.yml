@@ -1,0 +1,73 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/resqme-backend:latest # Adaptez le nom de l'image
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /var/www/resqme # Adaptez le chemin vers votre dossier de déploiement sur le VPS
+            echo "APP_NAME=${{ secrets.APP_NAME }}" > .env
+            echo "DATABASE_USERNAME=${{ secrets.DATABASE_USERNAME }}" > .env
+            echo "DATABASE_PASSWORD=${{ secrets.DATABASE_PASSWORD }}" >> .env
+            echo "DATABASE_NAME=${{ secrets.DATABASE_NAME }}" >> .env
+            echo "JWT_SECRET=${{ secrets.JWT_SECRET }}" >> .env
+            echo "JWT_EXPIRATION=${{ secrets.JWT_EXPIRATION }}" >> .env
+            echo "JWT_REFRESH_EXPIRATION=${{ secrets.JWT_REFRESH_EXPIRATION }}" >> .env
+            echo "FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}" >> .env
+            echo "FIREBASE_PRIVATE_KEY='${{ secrets.FIREBASE_PRIVATE_KEY }}'" >> .env # Assurez-vous que la clé privée est correctement échappée si multiligne
+            echo "FIREBASE_CLIENT_EMAIL=${{ secrets.FIREBASE_CLIENT_EMAIL }}" >> .env
+            echo "GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}" >> .env
+            echo "GOOGLE_ANDROID_CLIENT_ID=${{ secrets.GOOGLE_ANDROID_CLIENT_ID }}" >> .env
+            echo "GOOGLE_CALLBACK_URL=${{ secrets.GOOGLE_CALLBACK_URL }}" >> .env
+            echo "SMTP_FROM=${{ secrets.SMTP_FROM }}" >> .env
+            echo "SMTP_USER=${{ secrets.SMTP_USER }}" >> .env
+            echo "SMTP_PASS=${{ secrets.SMTP_PASS }}" >> .env
+            echo "SMTP_HOST=${{ secrets.SMTP_HOST }}" >> .env
+            echo "SMTP_PORT=${{ secrets.SMTP_PORT }}" >> .env
+            echo "SERVER_URL=${{ secrets.SERVER_URL }}" >> .env
+            echo "SUPPORT_EMAIL=${{ secrets.SUPPORT_EMAIL }}" >> .env
+            # REDIS_PASSWORD n'est pas défini ici car le docker-compose.yml n'a pas de mot de passe pour redis par défaut
+            # Si vous ajoutez un mot de passe à Redis, ajoutez la ligne suivante:
+            # echo "REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}" >> .env
+
+            # S'assurer que le docker-compose.yml est à jour (copier si nécessaire)
+            # Cette étape suppose que le docker-compose.yml est versionné avec le code et que le VPS a accès au repo
+            # ou que vous le copiez manuellement/via une autre méthode.
+            # Si vous voulez copier le docker-compose.yml via scp dans ce script:
+            # scp docker-compose.yml ${{ secrets.VPS_USERNAME }}@${{ secrets.VPS_HOST }}:~/app/docker-compose.yml
+            # Pour cet exemple, nous supposerons que le fichier est déjà là ou géré autrement.
+
+            docker-compose -f /var/www/resqme/docker-compose.yml pull app
+            docker-compose -f /var/www/resqme/docker-compose.yml up -d --remove-orphans
+            docker image prune -f
