@@ -1,5 +1,5 @@
 # Stage de build
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
@@ -16,7 +16,7 @@ COPY . .
 RUN npm run build
 
 # Stage de production
-FROM node:18-alpine
+FROM node:20-alpine
 
 WORKDIR /app
 
@@ -28,6 +28,9 @@ RUN npm ci --only=production
 
 # Copier les fichiers buildés depuis le stage de build
 COPY --from=builder /app/dist ./dist
+
+# Copier les templates email qui ne sont pas dans dist
+COPY --from=builder /app/src/notifications/templates ./dist/notifications/templates
 
 # Exposer le port
 EXPOSE 3000

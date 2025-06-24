@@ -11,6 +11,13 @@
   "auth.google.invalid_token": "Token Google invalide",
   "auth.logged_out_successfully": "Déconnexion réussie",
   "auth.password_updated_successfully": "Mot de passe mis à jour avec succès",
+  "auth.user.not_found": "Utilisateur non trouvé",
+  "auth.change_password.success": "Mot de passe modifié avec succès",
+  "auth.change_password.provider_mismatch": "Impossible de changer le mot de passe pour ce type de compte",
+  "auth.change_password.invalid_current_password": "Le mot de passe actuel est incorrect",
+  "auth.change_password.same_password": "Le nouveau mot de passe doit être différent de l'ancien",
+  "auth.change_password.failed": "Échec du changement de mot de passe",
+  "auth.reset_password.success": "Mot de passe réinitialisé avec succès",
   "logged_out_succesfully": "Déconnexion réussie",
 
   "users.not_found": "Utilisateur non trouvé",
@@ -67,4 +74,3 @@
   "common.logged_out_successfully": "Déconnexion réussie",
   "common.unknown_job_type": "Type de tâche inconnu"
 }
- 

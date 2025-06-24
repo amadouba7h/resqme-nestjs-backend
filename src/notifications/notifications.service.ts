@@ -18,6 +18,7 @@ export class NotificationsService {
   private readonly transporter: nodemailer.Transporter;
   private readonly logoPath: string;
   private readonly appName = 'ResQme';
+  private readonly serverUrl;
 
   constructor(
     private configService: ConfigService,
@@ -49,33 +50,17 @@ export class NotificationsService {
         pass: this.configService.get('SMTP_PASS'),
       },
     });
+    this.serverUrl = this.configService.get(
+      'SERVER_URL',
+      'http://localhost:3000',
+    );
 
     // Set logo path
     this.logoPath = path.join(process.cwd(), 'assets', 'logo.png');
   }
 
-  private generateAppDeepLink(alertId: string, userId: string): string {
-    return `resqme://alert?id=${alertId}&user=${userId}`;
-  }
-
   private generateDeepLink(alertId: string, userId: string): string {
-    // Utiliser l'adresse IP publique du serveur
-    const serverIp = this.configService.get('SERVER_PUBLIC_IP');
-    const protocol = this.configService.get('SERVER_PROTOCOL') || 'http';
-
-    // Utiliser un chemin spécifique pour identifier l'application mobile
-    // Ce chemin doit être configuré dans le serveur web pour rediriger vers l'application appropriée
-    const appPath = this.configService.get('APP_PATH') || 'resqme-api';
-
-    if (!serverIp) {
-      this.logger.warn(
-        'SERVER_PUBLIC_IP not configured, using localhost as fallback',
-      );
-      return `${protocol}://localhost/${appPath}/redirect?alertId=${alertId}&userId=${userId}`;
-    }
-
-    // Construire l'URL avec l'IP publique et le chemin spécifique
-    return `${protocol}://${serverIp}/${appPath}/redirect?alertId=${alertId}&userId=${userId}`;
+    return `${this.serverUrl}/sos/alert?id=${alertId}&userId=${userId}`;
   }
 
   async sendPushNotification(
@@ -97,7 +82,7 @@ export class NotificationsService {
 
       // If we have alert data, use the app deep link for push notifications
       if (data && data.alertId) {
-        data.deepLink = this.generateAppDeepLink(
+        data.deepLink = this.generateDeepLink(
           data.alertId,
           data.userId || userId,
         );
@@ -503,7 +488,7 @@ export class NotificationsService {
     try {
       const templatePath = path.join(
         process.cwd(),
-        'src',
+        'dist',
         'notifications',
         'templates',
         'emails',
@@ -514,9 +499,9 @@ export class NotificationsService {
 
       // Enrich context with default values
       const fullContext = {
-        appName: this.configService.get('APP_NAME') || 'Votre Application',
+        appName: this.configService.get('APP_NAME') || 'ResQme',
         supportEmail:
-          this.configService.get('SUPPORT_EMAIL') || 'support@example.com',
+          this.configService.get('SUPPORT_EMAIL') || 'support@resqme.com',
         logoCid: 'app-logo', // Default CID for the logo
         ...context,
       };
@@ -534,6 +519,7 @@ export class NotificationsService {
       // Add logo attachment if it exists and not already in attachments
       if (
         fs.existsSync(this.logoPath) &&
+        mailOptions.attachments &&
         !mailOptions.attachments.some((att) => att.cid === 'app-logo')
       ) {
         mailOptions.attachments.push({

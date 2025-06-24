@@ -26,11 +26,4 @@ export class ResetPasswordDto {
     },
   )
   password: string;
-
-  @ApiProperty({
-    description: 'Confirmation du nouveau mot de passe',
-    example: 'NewPassword123!',
-  })
-  @IsNotEmpty({ message: 'La confirmation du mot de passe est requise' })
-  passwordConfirmation: string;
 }

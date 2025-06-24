@@ -24,8 +24,8 @@ import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { User } from '../users/entities/user.entity';
-import { AuthGuard } from '@nestjs/passport';
 import { LocalAuthGuard } from './guards/local-auth.guard';
 
 @ApiTags('auth')
@@ -113,10 +113,9 @@ export class AuthController {
       },
     },
   })
-  @UseGuards(LocalAuthGuard)
   @HttpCode(HttpStatus.OK)
-  async login(@Request() req, @Body() loginDto: LoginDto) {
-    return this.authService.login(req.user);
+  async login(@Body() loginDto: LoginDto) {
+    return this.authService.validateUser(loginDto.email, loginDto.password);
   }
 
   @Post('register')
@@ -468,7 +467,7 @@ export class AuthController {
   })
   @ApiResponse({
     status: HttpStatus.BAD_REQUEST,
-    description: 'Format d\'email invalide',
+    description: "Format d'email invalide",
   })
   @ApiResponse({
     status: HttpStatus.NOT_FOUND,
@@ -495,7 +494,7 @@ export class AuthController {
       example1: {
         value: {
           token: 'valid_reset_token_jwt_or_uuid',
-          newPassword: 'NewSecurePassword123!',
+          password: 'NewSecurePassword123!',
         },
         summary: 'Exemple de réinitialisation',
       },
@@ -522,8 +521,63 @@ export class AuthController {
   async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
     await this.authService.resetPassword(
       resetPasswordDto.token,
-      resetPasswordDto.newPassword,
+      resetPasswordDto.password,
     );
     return { message: 'auth.reset_password.success' };
+  }
+
+  @Post('change-password')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Changer le mot de passe',
+    description:
+      'Permet à un utilisateur connecté de changer son mot de passe actuel',
+  })
+  @ApiBody({
+    type: ChangePasswordDto,
+    description: 'Données pour le changement de mot de passe',
+    examples: {
+      example1: {
+        value: {
+          currentPassword: 'CurrentPassword123!',
+          newPassword: 'NewPassword123!',
+        },
+        summary: 'Exemple de changement de mot de passe',
+      },
+    },
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Mot de passe changé avec succès',
+    schema: {
+      type: 'object',
+      properties: {
+        message: {
+          type: 'string',
+          example: 'auth.change_password.success',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'Token invalide ou mot de passe actuel incorrect',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description:
+      "Données invalides ou nouveau mot de passe identique à l'ancien",
+  })
+  async changePassword(
+    @Request() req: any,
+    @Body() changePasswordDto: ChangePasswordDto,
+  ) {
+    await this.authService.changePassword(
+      req.user.id,
+      changePasswordDto.currentPassword,
+      changePasswordDto.newPassword,
+    );
+    return { message: 'auth.change_password.success' };
   }
 }

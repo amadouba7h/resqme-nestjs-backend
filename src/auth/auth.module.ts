@@ -10,6 +10,7 @@ import { GoogleStrategy } from './strategies/google.strategy';
 import { RefreshTokenStrategy } from './strategies/refresh-token.strategy';
 import { LocalStrategy } from './strategies/local.strategy';
 import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
+import { NotificationsModule } from 'src/notifications/notifications.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
       }),
       inject: [ConfigService],
     }),
+    NotificationsModule,
   ],
   controllers: [AuthController],
   providers: [

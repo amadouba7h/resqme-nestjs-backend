@@ -1,11 +1,4 @@
-import {
-  Entity,
-  PrimaryGeneratedColumn,
-  Column,
-  OneToMany,
-  BeforeInsert,
-  BeforeUpdate,
-} from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, OneToMany } from 'typeorm';
 import { Exclude } from 'class-transformer';
 import { TrustedContact } from './trusted-contact.entity';
 import { SosAlert } from '../../sos/entities/sos-alert.entity';
@@ -73,11 +66,11 @@ export class User extends BaseEntity {
   @Exclude()
   refreshToken?: string | null;
 
-  @Column({ name: 'password_reset_token', nullable: true })
+  @Column({ name: 'password_reset_token', nullable: true, type: 'text' })
   @Exclude()
   passwordResetToken?: string | null;
 
-  @Column({ name: 'password_reset_expires', nullable: true })
+  @Column({ name: 'password_reset_expires', nullable: true, type: 'timestamp' })
   @Exclude()
   passwordResetExpires?: Date | null;
 
@@ -87,8 +80,6 @@ export class User extends BaseEntity {
   @OneToMany(() => SosAlert, (alert) => alert.user)
   alerts: SosAlert[];
 
-  @BeforeInsert()
-  @BeforeUpdate()
   async hashPassword() {
     if (this.password) {
       this.password = await bcrypt.hash(this.password, 10);
@@ -96,7 +87,16 @@ export class User extends BaseEntity {
   }
 
   async validatePassword(password: string): Promise<boolean> {
-    if (!this.password) return false;
+    // Vérifier que le mot de passe fourni n'est pas null, undefined ou vide
+    if (!password || typeof password !== 'string') {
+      return false;
+    }
+
+    // Vérifier que l'utilisateur a un mot de passe hashé
+    if (!this.password) {
+      return false;
+    }
+
     return await bcrypt.compare(password, this.password);
   }
 }

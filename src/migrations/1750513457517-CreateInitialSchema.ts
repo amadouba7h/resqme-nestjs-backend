@@ -1,7 +1,7 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class CreateInitialSchema1750190670821 implements MigrationInterface {
-  name = 'CreateInitialSchema1750190670821';
+export class CreateInitialSchema1750513457517 implements MigrationInterface {
+  name = 'CreateInitialSchema1750513457517';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`CREATE EXTENSION IF NOT EXISTS postgis;`);
@@ -40,7 +40,7 @@ export class CreateInitialSchema1750190670821 implements MigrationInterface {
       `CREATE TYPE "public"."users_provider_enum" AS ENUM('local', 'google', 'github', 'facebook')`,
     );
     await queryRunner.query(
-      `CREATE TABLE "users" ("created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "deleted_at" TIMESTAMP, "id" uuid NOT NULL DEFAULT uuid_generate_v4(), "email" character varying NOT NULL, "first_name" character varying NOT NULL, "last_name" character varying NOT NULL, "phone_number" character varying, "fcm_token" character varying, "role" "public"."users_role_enum" NOT NULL DEFAULT 'user', "provider" "public"."users_provider_enum" NOT NULL DEFAULT 'local', "provider_id" character varying, "is_active" boolean NOT NULL DEFAULT true, "password" character varying, "refresh_token" text, "password_reset_token" character varying, "password_reset_expires" TIMESTAMP, CONSTRAINT "UQ_97672ac88f789774dd47f7c8be3" UNIQUE ("email"), CONSTRAINT "PK_a3ffb1c0c8416b9fc6f907b7433" PRIMARY KEY ("id"))`,
+      `CREATE TABLE "users" ("created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "deleted_at" TIMESTAMP, "id" uuid NOT NULL DEFAULT uuid_generate_v4(), "email" character varying NOT NULL, "first_name" character varying NOT NULL, "last_name" character varying NOT NULL, "phone_number" character varying, "fcm_token" character varying, "role" "public"."users_role_enum" NOT NULL DEFAULT 'user', "provider" "public"."users_provider_enum" NOT NULL DEFAULT 'local', "provider_id" character varying, "is_active" boolean NOT NULL DEFAULT true, "password" character varying, "refresh_token" text, "password_reset_token" text, "password_reset_expires" TIMESTAMP, CONSTRAINT "UQ_97672ac88f789774dd47f7c8be3" UNIQUE ("email"), CONSTRAINT "PK_a3ffb1c0c8416b9fc6f907b7433" PRIMARY KEY ("id"))`,
     );
     await queryRunner.query(
       `ALTER TABLE "trusted_contacts" ADD CONSTRAINT "FK_d9959475c1ebe97e902f8adc9c7" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE NO ACTION ON UPDATE NO ACTION`,

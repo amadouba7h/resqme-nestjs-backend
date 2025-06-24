@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.resqme.resqme",
+      "sha256_cert_fingerprints": [
+        "F2:F5:62:F0:1E:61:EE:4C:9B:9F:3C:EB:28:4B:5C:85:A7:54:92:B2:43:92:21:0C:9D:53:48:5C:68:52:BE:E4"
+      ]
+    }
+  }
+]

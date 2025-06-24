@@ -223,7 +223,7 @@ export class SosService {
   getActiveAlert(userId: string): Promise<SosAlert | null> {
     return this.alertsRepository.findOne({
       where: { userId, status: AlertStatus.ACTIVE },
-      relations: ['locations'],
+      relations: ['locations', 'notifications', 'user'],
       order: { createdAt: 'DESC' },
     });
   }
@@ -231,7 +231,7 @@ export class SosService {
   async getAlert(alertId: string, userId: string): Promise<SosAlert> {
     const alert = await this.alertsRepository.findOne({
       where: { id: alertId, userId },
-      relations: ['locations', 'notifications'],
+      relations: ['locations', 'notifications', 'user'],
     });
 
     if (!alert) {
@@ -263,20 +263,74 @@ export class SosService {
     userId: string,
     page: number = 1,
     limit: number = 10,
-  ): Promise<{ alerts: SosAlert[]; total: number }> {
-    const [alerts, total] = await this.alertsRepository.findAndCount({
-      where: { userId },
-      relations: ['locations', 'notifications'],
-      order: {
-        createdAt: 'DESC',
-      },
-      skip: (page - 1) * limit,
-      take: limit,
+  ): Promise<{
+    alerts: (SosAlert & { userRole: 'owner' | 'contact' })[];
+    total: number;
+  }> {
+    // Récupérer les alertes lancées par l'utilisateur
+    const [userAlerts, userAlertsCount] =
+      await this.alertsRepository.findAndCount({
+        where: { userId },
+        relations: ['locations', 'notifications', 'user'],
+        order: {
+          createdAt: 'DESC',
+        },
+      });
+
+    // Récupérer les alertes où l'utilisateur a été contacté comme trusted contact
+    const [contactedAlerts, contactedAlertsCount] = await this.alertsRepository
+      .createQueryBuilder('alert')
+      .leftJoinAndSelect('alert.locations', 'locations')
+      .leftJoinAndSelect('alert.notifications', 'notifications')
+      .leftJoinAndSelect('alert.user', 'user')
+      .innerJoin('alert.notifications', 'notification')
+      .innerJoin(
+        'trusted_contacts',
+        'trustedContact',
+        'trustedContact.id = notification.recipientId',
+      )
+      .innerJoin(
+        'users',
+        'contactUser',
+        'contactUser.email = trustedContact.email',
+      )
+      .where('contactUser.id = :userId', { userId })
+      .orderBy('alert.createdAt', 'DESC')
+      .getManyAndCount();
+
+    // Combiner les deux listes et éliminer les doublons
+    const allAlertsMap = new Map<
+      string,
+      SosAlert & { userRole: 'owner' | 'contact' }
+    >();
+
+    // Ajouter les alertes de l'utilisateur
+    userAlerts.forEach((alert) => {
+      allAlertsMap.set(alert.id, { ...alert, userRole: 'owner' });
     });
 
+    // Ajouter les alertes où l'utilisateur a été contacté
+    contactedAlerts.forEach((alert) => {
+      if (!allAlertsMap.has(alert.id)) {
+        allAlertsMap.set(alert.id, { ...alert, userRole: 'contact' });
+      }
+    });
+
+    // Convertir en array et trier par date
+    const allAlerts = Array.from(allAlertsMap.values()).sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+
+    // Appliquer la pagination
+    const startIndex = (page - 1) * limit;
+    const paginatedAlerts = allAlerts.slice(startIndex, startIndex + limit);
+
+    console.log('contactedAlerts : ', contactedAlerts);
+
     return {
-      alerts,
-      total,
+      alerts: paginatedAlerts,
+      total: allAlerts.length,
     };
   }
 }

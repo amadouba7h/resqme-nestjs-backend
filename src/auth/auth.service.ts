@@ -4,7 +4,6 @@ import {
   Injectable,
   UnauthorizedException,
   BadRequestException,
-  NotFoundException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
@@ -14,6 +13,7 @@ import { User, AuthProvider, UserRole } from '../users/entities/user.entity';
 import { RegisterDto } from './dto/register.dto';
 import { DataSource } from 'typeorm';
 import { OAuth2Client } from 'google-auth-library';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class AuthService {
@@ -40,7 +40,10 @@ export class AuthService {
     await queryRunner.startTransaction();
 
     try {
-      const user = await this.usersService.findByEmail(email);
+      const user = await queryRunner.manager.findOne(User, {
+        where: { email },
+      });
+
       if (!user) {
         throw new UnauthorizedException('auth.invalid_credentials');
       }
@@ -314,7 +317,9 @@ export class AuthService {
       const expires = new Date();
       expires.setSeconds(
         expires.getSeconds() +
-          parseInt(this.configService.get('JWT_RESET_PASSWORD_EXPIRATION')),
+          parseInt(
+            this.configService.get('JWT_RESET_PASSWORD_EXPIRATION', '60'),
+          ),
       );
 
       user.passwordResetToken = resetToken;
@@ -322,11 +327,13 @@ export class AuthService {
 
       await queryRunner.manager.save(User, user);
 
-      // Envoyer l'email de réinitialisation
-      const resetLink = `${this.configService.get(
-        'CLIENT_URL',
-      )}/reset-password?token=${resetToken}`;
-      const appName = this.configService.get('APP_NAME') || 'Votre Application';
+      // Générer un lien de réinitialisation basé sur l'IP publique du serveur
+      const serverUrl = this.configService.get('SERVER_URL', 'localhost');
+
+      // Créer un lien de réinitialisation qui sera utilisé par l'application mobile
+      const resetLink = `${serverUrl}/reset-password?token=${resetToken}`;
+
+      const appName = this.configService.get('APP_NAME', 'ResQme');
       const expirationTime =
         this.configService.get('JWT_RESET_PASSWORD_EXPIRATION_HUMAN') ||
         'un certain temps';
@@ -412,18 +419,13 @@ export class AuthService {
 
       // Vérifier si le compte est local
       if (user.provider !== AuthProvider.LOCAL) {
-        throw new BadRequestException(
-          'auth.reset_password.provider_not_local',
-        );
+        throw new BadRequestException('auth.reset_password.provider_not_local');
       }
 
       user.password = newPassword; // Le hook @BeforeUpdate s'occupera du hashage
       user.passwordResetToken = null;
       user.passwordResetExpires = null;
-
-      // Forcer le hashage du mot de passe si le hook ne se déclenche pas correctement pour une raison ou une autre
-      // (normalement, il devrait avec queryRunner.manager.save)
-      // await user.hashPassword(); // Redondant si le hook fonctionne bien
+      await user.hashPassword();
 
       await queryRunner.manager.save(User, user);
       await queryRunner.commitTransaction();
@@ -450,6 +452,80 @@ export class AuthService {
       // Log l'erreur interne
       console.error('Error in resetPassword:', error);
       throw new BadRequestException('auth.reset_password.failed');
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  async hashPassword(password: string) {
+    if (password) {
+      return await bcrypt.hash(password, 10);
+    }
+  }
+
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<void> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      // Récupérer l'utilisateur
+      const user = await this.usersService.findById(userId, true);
+
+      // Vérifier que l'utilisateur utilise l'authentification locale
+      if (user.provider !== AuthProvider.LOCAL) {
+        throw new BadRequestException('auth.change_password.provider_mismatch');
+      }
+
+      // Vérifier le mot de passe actuel
+      const isCurrentPasswordValid =
+        await user.validatePassword(currentPassword);
+      if (!isCurrentPasswordValid) {
+        throw new UnauthorizedException(
+          'auth.change_password.invalid_current_password',
+        );
+      }
+
+      // Vérifier que le nouveau mot de passe est différent de l'ancien
+      const isSamePassword = await user.validatePassword(newPassword);
+      if (isSamePassword) {
+        throw new BadRequestException('auth.change_password.same_password');
+      }
+
+      // Mettre à jour le mot de passe
+      user.password = newPassword;
+      await user.hashPassword();
+      await queryRunner.manager.save(User, user);
+
+      // Envoyer une notification par email
+      const appName = this.configService.get('APP_NAME', 'ResQme');
+      await this.notificationQueueService.addEmailJob(
+        user.email,
+        `Mot de passe modifié - ${appName}`,
+        'password-changed', // Nom du template
+        {
+          firstName: user.firstName,
+          appName,
+          changeDate: new Date().toLocaleString('fr-FR'),
+        },
+      );
+
+      await queryRunner.commitTransaction();
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      if (
+        error instanceof UnauthorizedException ||
+        error instanceof BadRequestException
+      ) {
+        throw error;
+      }
+      // Log l'erreur interne
+      console.error('Error in changePassword:', error);
+      throw new BadRequestException('auth.change_password.failed');
     } finally {
       await queryRunner.release();
     }
