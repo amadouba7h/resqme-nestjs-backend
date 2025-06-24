@@ -50,10 +50,7 @@ export class NotificationsService {
         pass: this.configService.get('SMTP_PASS'),
       },
     });
-    this.serverUrl = this.configService.get(
-      'SERVER_URL',
-      'http://localhost:3000',
-    );
+    this.serverUrl = this.configService.get('SERVER_URL', 'https://resqme.app');
 
     // Set logo path
     this.logoPath = path.join(process.cwd(), 'assets', 'logo.png');

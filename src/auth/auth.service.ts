@@ -328,7 +328,10 @@ export class AuthService {
       await queryRunner.manager.save(User, user);
 
       // Générer un lien de réinitialisation basé sur l'IP publique du serveur
-      const serverUrl = this.configService.get('SERVER_URL', 'localhost');
+      const serverUrl = this.configService.get(
+        'SERVER_URL',
+        'https://resqme.app',
+      );
 
       // Créer un lien de réinitialisation qui sera utilisé par l'application mobile
       const resetLink = `${serverUrl}/reset-password?token=${resetToken}`;
@@ -431,9 +434,9 @@ export class AuthService {
       await queryRunner.commitTransaction();
 
       // Optionnel: envoyer un email de confirmation de changement de mot de passe
-      const appName = this.configService.get('APP_NAME') || 'Votre Application';
+      const appName = this.configService.get('APP_NAME', 'ResQme');
       const supportEmail =
-        this.configService.get('SUPPORT_EMAIL') || 'support@example.com';
+        this.configService.get('SUPPORT_EMAIL') || 'support@resqme.app';
       await this.notificationQueueService.addEmailJob(
         user.email,
         `Confirmation de réinitialisation de mot de passe - ${appName}`,
