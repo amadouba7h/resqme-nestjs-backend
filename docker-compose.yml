@@ -2,9 +2,7 @@
 
 services:
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: amadouba7hh/resqme-backend:latest
     env_file:
       - path: ./.env
         required: true
