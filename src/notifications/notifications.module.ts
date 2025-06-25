@@ -9,6 +9,7 @@ import { User } from 'src/users/entities/user.entity';
 import { AlertNotification } from '../sos/entities/alert-notification.entity';
 import { NotificationProcessor } from './processors/notification.processor';
 import { NotificationQueueService } from './services/notification-queue.service';
+import { AuthModule } from 'src/auth/auth.module';
 
 @Module({
   imports: [

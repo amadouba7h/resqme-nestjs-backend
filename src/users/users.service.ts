@@ -36,10 +36,7 @@ export class UsersService {
 
     try {
       const existingUser = await queryRunner.manager.findOne(User, {
-        where: [
-          { email: userData.email },
-          { providerId: userData.providerId, provider: userData.provider },
-        ],
+        where: [{ email: userData.email }],
       });
 
       if (existingUser) {
@@ -47,6 +44,7 @@ export class UsersService {
       }
 
       const user = this.userRepository.create(userData);
+      await user.hashPassword();
       const savedUser = await queryRunner.manager.save(User, user);
 
       await queryRunner.commitTransaction();

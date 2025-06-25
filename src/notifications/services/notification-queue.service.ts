@@ -165,7 +165,8 @@ export class NotificationQueueService {
   async addEmailJob(
     to: string,
     subject: string,
-    html: string,
+    template: string, // Nom du template Handlebars
+    context?: Record<string, any>, // Données pour le template
     attachments?: Array<{
       filename: string;
       path: string;
@@ -176,7 +177,8 @@ export class NotificationQueueService {
       const jobData: EmailJobData = {
         to,
         subject,
-        html,
+        template,
+        context,
         attachments,
       };
 

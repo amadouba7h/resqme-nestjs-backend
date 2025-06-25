@@ -8,6 +8,7 @@ import { AlertLocation } from '../sos/entities/alert-location.entity';
 import { AlertResolutionReason } from '../sos/entities/sos-alert.entity';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as handlebars from 'handlebars';
 import { InjectRepository } from '@nestjs/typeorm';
 import { User } from 'src/users/entities/user.entity';
 
@@ -17,6 +18,7 @@ export class NotificationsService {
   private readonly transporter: nodemailer.Transporter;
   private readonly logoPath: string;
   private readonly appName = 'ResQme';
+  private readonly serverUrl;
 
   constructor(
     private configService: ConfigService,
@@ -48,33 +50,14 @@ export class NotificationsService {
         pass: this.configService.get('SMTP_PASS'),
       },
     });
+    this.serverUrl = this.configService.get('SERVER_URL', 'https://resqme.app');
 
     // Set logo path
     this.logoPath = path.join(process.cwd(), 'assets', 'logo.png');
   }
 
-  private generateAppDeepLink(alertId: string, userId: string): string {
-    return `resqme://alert?id=${alertId}&user=${userId}`;
-  }
-
   private generateDeepLink(alertId: string, userId: string): string {
-    // Utiliser l'adresse IP publique du serveur
-    const serverIp = this.configService.get('SERVER_PUBLIC_IP');
-    const protocol = this.configService.get('SERVER_PROTOCOL') || 'http';
-
-    // Utiliser un chemin spécifique pour identifier l'application mobile
-    // Ce chemin doit être configuré dans le serveur web pour rediriger vers l'application appropriée
-    const appPath = this.configService.get('APP_PATH') || 'resqme-api';
-
-    if (!serverIp) {
-      this.logger.warn(
-        'SERVER_PUBLIC_IP not configured, using localhost as fallback',
-      );
-      return `${protocol}://localhost/${appPath}/redirect?alertId=${alertId}&userId=${userId}`;
-    }
-
-    // Construire l'URL avec l'IP publique et le chemin spécifique
-    return `${protocol}://${serverIp}/${appPath}/redirect?alertId=${alertId}&userId=${userId}`;
+    return `${this.serverUrl}/sos/alert?id=${alertId}&userId=${userId}`;
   }
 
   async sendPushNotification(
@@ -96,7 +79,7 @@ export class NotificationsService {
 
       // If we have alert data, use the app deep link for push notifications
       if (data && data.alertId) {
-        data.deepLink = this.generateAppDeepLink(
+        data.deepLink = this.generateDeepLink(
           data.alertId,
           data.userId || userId,
         );
@@ -482,5 +465,81 @@ export class NotificationsService {
       return { fcmToken: user.fcmToken };
     }
     return null; // Placeholder
+  }
+
+  async sendEmailWithTemplate(
+    to: string,
+    subject: string,
+    templateName: string,
+    context?: Record<string, any>,
+    attachments?: Array<{
+      filename: string;
+      path: string;
+      cid: string;
+    }>,
+  ): Promise<void> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const templatePath = path.join(
+        process.cwd(),
+        'dist',
+        'notifications',
+        'templates',
+        'emails',
+        `${templateName}.hbs`,
+      );
+      const templateSource = await fs.promises.readFile(templatePath, 'utf-8');
+      const template = handlebars.compile(templateSource);
+
+      // Enrich context with default values
+      const fullContext = {
+        appName: this.configService.get('APP_NAME') || 'ResQme',
+        supportEmail:
+          this.configService.get('SUPPORT_EMAIL') || 'support@resqme.com',
+        logoCid: 'app-logo', // Default CID for the logo
+        ...context,
+      };
+
+      const html = template(fullContext);
+
+      const mailOptions: nodemailer.SendMailOptions = {
+        from: `${this.appName} <${this.configService.get('SMTP_FROM')}>`,
+        to,
+        subject,
+        html,
+        attachments: attachments || [],
+      };
+
+      // Add logo attachment if it exists and not already in attachments
+      if (
+        fs.existsSync(this.logoPath) &&
+        mailOptions.attachments &&
+        !mailOptions.attachments.some((att) => att.cid === 'app-logo')
+      ) {
+        mailOptions.attachments.push({
+          filename: 'logo.png',
+          path: this.logoPath,
+          cid: 'app-logo', // Make sure this CID matches what's in your templates
+        });
+      }
+
+      await this.transporter.sendMail(mailOptions);
+      await queryRunner.commitTransaction();
+      this.logger.log(
+        `Email with template ${templateName} sent to ${to} successfully.`,
+      );
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      this.logger.error(
+        `Failed to send email with template ${templateName} to ${to}: ${error.message}`,
+      );
+      // Ne pas relancer l'erreur ici pour que le job BullMQ puisse la gérer
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
   }
 }

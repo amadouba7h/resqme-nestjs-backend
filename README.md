@@ -358,6 +358,11 @@ SMTP_USER=your_smtp_user
 SMTP_PASS=your_smtp_password
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
+
+# Redis (ajouté pour BullMQ et la mise en cache éventuelle)
+REDIS_HOST=localhost # Ou l'hôte de votre service Redis si externe
+REDIS_PORT=6379
+# REDIS_PASSWORD=your_redis_password # Décommentez si votre Redis a un mot de passe
 ```
 
 ### Démarrage
@@ -411,16 +416,18 @@ docker-compose exec app npm run migration:run
 - **docker-compose.yml** : Configuration des services
   - `app` : Application NestJS
   - `postgres` : Base de données PostgreSQL avec PostGIS
+  - `redis` : Service Redis pour BullMQ et la mise en cache
   - Réseau dédié pour la communication entre les services
-  - Volume persistant pour les données PostgreSQL
+  - Volumes persistants pour les données PostgreSQL et Redis
 
 ### Volumes
 
 - `postgres_data` : Stockage persistant des données PostgreSQL
+- `redis_data` : Stockage persistant des données Redis (si configuré pour la persistance dans Redis)
 
 ### Réseaux
 
-- `sos-network` : Réseau bridge pour la communication entre les conteneurs
+- `resqme-network` : Réseau bridge pour la communication entre les conteneurs (Note: le nom a été uniformisé avec celui dans `docker-compose.yml`)
 
 ## Contribution
 

@@ -52,7 +52,8 @@ export interface SmsJobData {
 export interface EmailJobData {
   to: string;
   subject: string;
-  html: string;
+  template: string; // Nom du template (ex: 'reset-password')
+  context?: Record<string, any>; // Données pour le template
   attachments?: Array<{
     filename: string;
     path: string;
