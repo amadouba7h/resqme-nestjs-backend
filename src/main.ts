@@ -7,12 +7,13 @@ import { ValidationError } from 'class-validator';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // Configuration CORS
+  // Configuration CORS pour mobile
   app.enableCors({
-    origin: ['*'],
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    origin: true,
+    methods: 'GET,POST,PUT,DELETE,PATCH,OPTIONS',
+    allowedHeaders: 'Content-Type,Authorization,Accept,Origin,X-Requested-With',
     credentials: true,
+    optionsSuccessStatus: 200,
   });
 
   app.setGlobalPrefix('api');
@@ -54,8 +55,12 @@ async function bootstrap() {
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api', app, document); // ⬅️ expose sur /api
+  SwaggerModule.setup('api', app, document); // expose sur /api
 
-  await app.listen(process.env.PORT ?? 3000);
+  const port = process.env.PORT ?? 3000;
+  await app.listen(port, '0.0.0.0'); // Écouter sur toutes les interfaces
+
+  console.log(`🚀 Server running on http://0.0.0.0:${port}`);
+  console.log(`📚 API Documentation available at http://0.0.0.0:${port}/api`);
 }
 bootstrap();

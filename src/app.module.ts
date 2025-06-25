@@ -9,6 +9,7 @@ import { UsersModule } from './users/users.module';
 import { SosModule } from './sos/sos.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { AdminModule } from './admin/admin.module';
+import { HealthModule } from './health/health.module';
 import { DatabaseConfigService } from './config/database.config';
 
 @Module({
@@ -35,6 +36,7 @@ import { DatabaseConfigService } from './config/database.config';
     SosModule,
     NotificationsModule,
     AdminModule,
+    HealthModule,
   ],
   controllers: [AppController],
   providers: [AppService],
