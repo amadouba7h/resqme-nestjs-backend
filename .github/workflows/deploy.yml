@@ -68,6 +68,6 @@ jobs:
             # scp docker-compose.yml ${{ secrets.VPS_USERNAME }}@${{ secrets.VPS_HOST }}:~/app/docker-compose.yml
             # Pour cet exemple, nous supposerons que le fichier est déjà là ou géré autrement.
 
-            docker-compose -f /var/www/resqme/docker-compose.yml pull app
-            docker-compose -f /var/www/resqme/docker-compose.yml up -d --remove-orphans
+            docker compose -f /var/www/resqme/docker-compose.yml pull app
+            docker compose -f /var/www/resqme/docker-compose.yml up -d --remove-orphans
             docker image prune -f
