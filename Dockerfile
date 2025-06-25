@@ -24,7 +24,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Installer uniquement les dépendances de production
-RUN npm ci --only=production
+RUN npm ci --omit=dev
 
 # Copier les fichiers buildés depuis le stage de build
 COPY --from=builder /app/dist ./dist
@@ -36,4 +36,4 @@ COPY --from=builder /app/src/notifications/templates ./dist/notifications/templa
 EXPOSE 3000
 
 # Commande de démarrage
-CMD ["node", "dist/main"] 
+CMD ["node", "dist/main"]
