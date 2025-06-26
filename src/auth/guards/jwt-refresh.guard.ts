@@ -4,7 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 import { Observable } from 'rxjs';
 
 @Injectable()
-export class JwtRefreshGuard extends AuthGuard('jwt') {
+export class JwtRefreshGuard extends AuthGuard('jwt-refresh') {
   constructor(private jwtService: JwtService) {
     super();
   }
