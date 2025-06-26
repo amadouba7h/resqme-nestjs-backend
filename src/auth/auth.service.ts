@@ -310,7 +310,9 @@ export class AuthService {
         { sub: user.id, email: user.email },
         {
           secret: this.configService.get('JWT_RESET_PASSWORD_SECRET'),
-          expiresIn: this.configService.get('JWT_RESET_PASSWORD_EXPIRATION'),
+          expiresIn: parseInt(
+            this.configService.get('JWT_RESET_PASSWORD_EXPIRATION', '3600'),
+          ),
         },
       );
 
@@ -318,7 +320,7 @@ export class AuthService {
       expires.setSeconds(
         expires.getSeconds() +
           parseInt(
-            this.configService.get('JWT_RESET_PASSWORD_EXPIRATION', '60'),
+            this.configService.get('JWT_RESET_PASSWORD_EXPIRATION', '3600'),
           ),
       );
 
